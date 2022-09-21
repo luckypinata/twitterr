@@ -64,8 +64,7 @@ scrape_twitter <- function() {
   unique_politicians <- gsub("@", "", unique_politicians)
   unique_politicians <- unique_politicians[1:2] ### remove this in production
   
-  # change to rdi format.
-  bearer_token <- "AAAAAAAAAAAAAAAAAAAAAN8pXwEAAAAAanosScgLp%2BbEPu2%2FeyCaOh8FWBM%3DinmAWQL6sJRH2e7NC4diJJ1ZI1W6qH5jQzRuRYwDMNV1Rdu5WU"
+  bearer_token <- read.delim("bearer.txt",header = FALSE) %>% as.character()
   
   headers <- c(`Authorization` = sprintf('Bearer %s', bearer_token))
   
