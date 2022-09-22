@@ -25,7 +25,7 @@ require(shinythemes)
 require(purrr)
 
 setwd("~/dev/unlucky/app")
-df <- read.csv("data/df.csv") # change to SQL command
+df <- read.csv("data/df.csv") # change to SQL command?
 
 ui <- fluidPage(theme = shinytheme("journal"),
       
@@ -43,10 +43,7 @@ ui <- fluidPage(theme = shinytheme("journal"),
 
                            fluidRow(
                              column(12,
-                                    tags$body(" Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. 
-                                                        At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet, 
-                                                        consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. 
-                                                        Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet."),
+                                    tags$body(" The following graphic allows you to select one variable from the dropdown menu, as well as up to 5 individuals for comparison on the selected variable. The computed values for the y-axis are different metrics averaged for the tweets corresponding to day d and indivdual i over time. The variable \"Overall\" corresponds to a mean measurement of all different metrics for individual i. The table below simply shows the all time top tweets in the entire dataset by overall interaction score."),
                                     style= "text-align: .h3; color: black")
                            ),
                            
@@ -175,7 +172,7 @@ ui <- fluidPage(theme = shinytheme("journal"),
                            
                            fluidRow(
                              column(12,
-                                    tags$body(" The figures below show (1) show the frequancy of the topics computed above for any candidate/handle, and (2) present the computed difference between both frequencies to represent overall sentiment for indviual i and topic j."),
+                                    tags$body(" The figures below show (1) show the frequancy of the topics computed above for any candidate/handle, and (2) present the computed difference between both frequencies to represent overall sentiment for indviual i and topic j over time."),
                                     style= "text-align: .h3; color: black")
                            ),
                            
@@ -189,10 +186,8 @@ ui <- fluidPage(theme = shinytheme("journal"),
                                                 
                                                         tags$td(style="width:50%",
                                                                 titlePanel(h2("Sentiment for STM Topics",align="center")))
-                                     )
-                                                )
-                                     
-                                                
+                                       )
+                                      )
                                      )           
                                
                             ),
@@ -326,7 +321,7 @@ server <- function(input, output) {
     colnames(mpoptweet) <- c("Rank", "User", "Tweet")
     as.data.frame(mpoptweet, check.names = FALSE)
     
-  },align = "c")
+  }, align = "c")
   
   output$wordcloud <- renderPlot({ # wordcloud function
     
