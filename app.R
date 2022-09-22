@@ -25,13 +25,7 @@ require(shinythemes)
 require(purrr)
 
 setwd("~/dev/unlucky/app")
-
-# change to SQL command
-df <- read.csv("data/df.csv")
-
-#
-### Making different desc. tables
-#
+df <- read.csv("data/df.csv") # change to SQL command
 
 ui <- fluidPage(theme = shinytheme("journal"),
       
@@ -41,22 +35,20 @@ ui <- fluidPage(theme = shinytheme("journal"),
                   
                   tabPanel("Home",
                            mainPanel(tags$h3("Tag")) # include dataset with list of subjects and some secriptions of dataset / what website is
+                           # add some of the scraping code and explain
+                           # add US state map and show freq of tweets by region and party.
                   ), # end tab 1
                   
                   tabPanel("Descriptive",
-                           
-                           #fluidRow(
-                           #  column(width=12,
-                           #         mainPanel(tags$h3("Tag"),style= "text-align: left; color: blue")
-                           #  )),
+
                            fluidRow(
-                             column(width = 12,
-                                    mainPanel(tags$body(" Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. 
+                             column(12,
+                                    tags$body(" Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. 
                                                         At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet, 
                                                         consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. 
                                                         Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet."),
-                                              style= "text-align: .h3; color: black")
-                             )),
+                                    style= "text-align: .h3; color: black")
+                           ),
                            
                            fluidRow(column(12,hr())),
                            
@@ -96,20 +88,24 @@ ui <- fluidPage(theme = shinytheme("journal"),
                            
                            fluidRow(
                              column(12,
-                                    tags$body(" Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. 
-                                                        At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet, 
-                                                        consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. 
-                                                        Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet."),
+                                    tags$h5(" This section allows for some degree of tailored NLP analytics of the dataset outlined in the \"Home\" section of this App."),
                                     style= "text-align: .h3; color: black")
                            ),
                            
                            fluidRow(column(12,hr())),
                            
-                           # change to sidebarPanel
+                           fluidRow(
+                             column(12,
+                                    tags$body(" The outputs below -- given no specified filters/inputs -- depict the word clouds (where the size of any given word is determined by its relative frequency in the corpus) of the entire corpus grouped by political affiliation. Up to 3 filters may be added to examine desired individuals and their associations.
+                                               The \"topic\" filter allows the user to search for a specific keyword. The algorithm will keep tokens up to 10 words away from the desired keyword as a \"window\"."),
+                                    style= "text-align: .h3; color: black")
+                           ),
+                           
+                           fluidRow(column(12,hr())),
                            
                            sidebarPanel(
                              
-                             selectInput("analysis_units_individual", label=h3("Select Units"),
+                             selectInput("analysis_units_individual", label=h3("Select Handle(s)"),
                                          choices=unique(na.omit(df$data.username)), multiple=TRUE), # add republicans, democrats as options
                              hr(),
                              selectInput("analysis_units_topic", label = h3("Select Topic"),
@@ -124,41 +120,50 @@ ui <- fluidPage(theme = shinytheme("journal"),
                            
                            fluidRow(
                              column(12,
-                                    tags$body(" Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. 
-                                                        At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet, 
-                                                        consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. 
-                                                        Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet."),
+                                    tags$body(" In the following outputs, the scraped dataset is run through an algorithm which applied probabilistic topic models to extract the most important topics from the given corpus. 
+                                                In later versions of this app, tools for measurement of latent variables will be added as well.
+                                              Specifically, the topic model uses the Structural Topic Model (STM) framework, which allows for the accommodation of corpus structure through the use of document level covariates which may affect topical prevalence and content.
+                                              The heuristics of the formal processes involved are shown in the figure below, which is taken from "),
+                                    tags$a(href="https://cran.r-project.org/web/packages/stm/vignettes/stmVignette.pdf", "Roberts et al. (2019): "),
                                     style= "text-align: .h3; color: black")
+                            ),
+                             
+                           fluidRow(column(12,hr())),
+                           
+                           fluidRow(
+                           column(12, align="center",
+                                  HTML('<img src="stm.png",  
+                                         style="text-align: center;"/>','<p style="text-align: center"></p>')
+                                  )
+                                  
                            ),
                            
                            fluidRow(column(12,hr())),
                            
                            fluidRow(
-                             
-                             column(6,
-                                    selectInput("stm_handles", label = h3("Select Handles"),
-                                                choices = unique(na.omit(df$data.username)))
-                             ),
-                             column(6,
-                                    tags$h2("STM Topics and Keywords"),style = "text-align: left;"
-                                    )
-                             #column(6, tags$h4("STM Topics and Keywords"))
-                             #column(6,
-                             #        sliderInput("topics_slider", "Number of Topics:",
-                             #                    min = 0, max = 20,
-                             #                    value = 10)
-                             # )
-                             
+                             column(12, align="center",
+                                    tags$table(style="width:100%",
+                                      tags$tr(tags$td(style="width:50%",
+                                                        selectInput("stm_handles", label = h3("Select Handle"),
+                                                          choices = unique(na.omit(df$data.username))),align="center"),
+                                              tags$td(style="width:50%",
+                                                titlePanel(h2("STM Topics and Keywords",align="center")))
+                                              )
+                           )           
+                           ) 
                            ),
                            
                            fluidRow(column(12,hr())),
-                           
-                           fluidRow(column(12,align="center",
-                             tableOutput(outputId = "sentiment_topics_vector")
+
+                           fluidRow(
+                             column(width = 12, align="center",
+                                tableOutput(outputId = "sentiment_topics_vector")
                              )
-                             ),
+                           ),
                            
                            fluidRow(column(12,hr())),
+                          
+                          
                            
                            fluidRow(
                              
@@ -170,19 +175,32 @@ ui <- fluidPage(theme = shinytheme("journal"),
                            
                            fluidRow(
                              column(12,
-                                    tags$body(" Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. 
-                                                        At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet, 
-                                                        consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. 
-                                                        Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet."),
+                                    tags$body(" The figures below show (1) show the frequancy of the topics computed above for any candidate/handle, and (2) present the computed difference between both frequencies to represent overall sentiment for indviual i and topic j."),
                                     style= "text-align: .h3; color: black")
                            ),
                            
                            fluidRow(column(12,hr())),
+                          
+                            fluidRow(
+                              column(12, align="center",
+                                     tags$table(style="width:100%",
+                                                tags$tr(tags$td(style="width:50%",
+                                                                uiOutput("topics_input"),align="center"),
+                                                
+                                                        tags$td(style="width:50%",
+                                                                titlePanel(h2("Sentiment for STM Topics",align="center")))
+                                     )
+                                                )
+                                     
+                                                
+                                     )           
+                               
+                            ),
                            
-                           fluidRow(column(12,
-                                           uiOutput("topics_input"))
+                           #fluidRow(column(12,
+                          #                 uiOutput("topics_input"))
 
-                           ), # end row
+                           #), # end row
                            
                            fluidRow(column(12,hr())),
                            
@@ -245,6 +263,7 @@ server <- function(input, output) {
     
     ### make sure to keep colors red blue for Party specific graph
     if (length(plot1_vals)==0){
+      group.colours <- c(D = "#333BFF", R = "#FF0000")
       plot1 <- df %>% 
         group_by(data.created_at,Party) %>%
         mutate(m_rtweet = mean(data.public_metrics.retweet_count),
@@ -260,7 +279,8 @@ server <- function(input, output) {
         theme(legend.position="bottom") +
         labs(color="Party") +
         xlab("Time") +
-        ylab(as.character(yaxis()))
+        ylab(as.character(yaxis())) +
+        scale_color_manual(values=group.colours)
       plot1
     } else if (length(plot1_vals)>=1&length(plot1_vals)<=5) {
       plot1 <- df %>% 
@@ -304,7 +324,7 @@ server <- function(input, output) {
     mpoptweet <- mpoptweet %>% 
       select(c(rank,data.username,data.text))
     colnames(mpoptweet) <- c("Rank", "User", "Tweet")
-    mpoptweet
+    as.data.frame(mpoptweet, check.names = FALSE)
     
   },align = "c")
   
@@ -322,9 +342,6 @@ server <- function(input, output) {
     } else{
       wordcloud_topic <- c("inflation","stagflation")
     }
-    
-    # make topics dynamic
-    ## scrape YouGov and chose topics then add to menu
     
     if (length(wordcloud_individuals) <= 3 & length(wordcloud_individuals) >= 1) {
       
@@ -420,8 +437,7 @@ server <- function(input, output) {
   output$sentiment_topics_vector <- renderTable({
     
     handle <- input$stm_handles
-    topic_count <- 10#as.integer(input$topics_slider)
-    #text(x=0.5,y=0.5,paste(handle),col="red")
+    topic_count <- 10
     
     stm_df <- df %>%
       filter(data.username == as.character(handle))
@@ -480,7 +496,7 @@ server <- function(input, output) {
     stm_topic_selection <- as.list(topics_keywords)
     names(stm_topic_selection) <- gsub("(?<=\\D)(?=\\d)", " ", names(stm_topic_selection), perl = TRUE)
     
-    as.data.frame(stm_topic_selection, col.names = names(stm_topic_selection))
+    as.data.frame(stm_topic_selection, col.names = names(stm_topic_selection), check.names = FALSE)
     #sentiment_topics <- names(stm_topic_selection)
     
     
