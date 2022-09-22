@@ -24,17 +24,44 @@ require(shinydashboard)
 require(shinythemes)
 require(purrr)
 
-setwd("~/dev/unlucky/app")
+setwd("~/dev/unlucky/app") # remove in prod.
 df <- read.csv("data/df.csv") # change to SQL command?
 
-ui <- fluidPage(theme = shinytheme("journal"),
+ui <- fluidPage(theme = shinytheme("yeti"),
       
                 navbarPage(
                   
                   "TWITTERR",
                   
                   tabPanel("Home",
-                           mainPanel(tags$h3("Tag")) # include dataset with list of subjects and some secriptions of dataset / what website is
+                           fluidRow(
+                             column(12,
+                                    tags$body(" The aim of this application is to allow easy analysis of politicians' sentiments on specific topics.
+                                              The data used has been scraped of Twitter, for all available public profiles maintained by current members of congress, in both the house and senate.
+                                               The available individuals and some descriptive information is presented below. 
+                                              "),
+                                    style= "text-align: .h3; color: black")
+                           ),
+                           
+                           br(),
+                           
+                           fluidRow(
+                             column(12,
+                                    tags$body(" The associated tweets are scraped, structured and stored automatically by the server, updating continuously as new data is created. The analytics tab then allows
+                                              the user to run this corpus of filtered tweets through a sentiment algorithm to determine the prevalence of important topics, as well as the accompanying sentiment
+                                              on said topic by a given individual."),
+                                    style= "text-align: .h3; color: black")
+                                    
+                           ),
+                           
+                           fluidRow(column(12,hr())),
+                           
+                           fluidRow(
+                             column(12,align="center",
+                                    dataTableOutput(outputId = "politicians"))
+                           ),
+                           
+                           fluidRow(column(12,hr()))
                            # add some of the scraping code and explain
                            # add US state map and show freq of tweets by region and party.
                   ), # end tab 1
@@ -72,10 +99,11 @@ ui <- fluidPage(theme = shinytheme("journal"),
                            
                            fluidRow(column(12,hr())),
                            
-                           fluidRow(column(12,align="center",
+                           fluidRow(
+                             column(12,align="center",
                                            tableOutput(outputId = "top_tweets")
-                                           )
-                                    ),
+                                    )
+                           ),
                            
                            fluidRow(column(12,hr()))
                            
@@ -101,7 +129,6 @@ ui <- fluidPage(theme = shinytheme("journal"),
                            fluidRow(column(12,hr())),
                            
                            sidebarPanel(
-                             
                              selectInput("analysis_units_individual", label=h3("Select Handle(s)"),
                                          choices=unique(na.omit(df$data.username)), multiple=TRUE), # add republicans, democrats as options
                              hr(),
@@ -132,7 +159,6 @@ ui <- fluidPage(theme = shinytheme("journal"),
                                   HTML('<img src="stm.png",  
                                          style="text-align: center;"/>','<p style="text-align: center"></p>')
                                   )
-                                  
                            ),
                            
                            fluidRow(column(12,hr())),
@@ -145,9 +171,7 @@ ui <- fluidPage(theme = shinytheme("journal"),
                                                           choices = unique(na.omit(df$data.username))),align="center"),
                                               tags$td(style="width:50%",
                                                 titlePanel(h2("STM Topics and Keywords",align="center")))
-                                              )
-                           )           
-                           ) 
+                            ))) 
                            ),
                            
                            fluidRow(column(12,hr())),
@@ -166,7 +190,7 @@ ui <- fluidPage(theme = shinytheme("journal"),
                              
                              plotOutput(outputId = "stm_topics")
                              
-                           ), # end row
+                           ),
                            
                            fluidRow(column(12,hr())),
                            
@@ -186,17 +210,10 @@ ui <- fluidPage(theme = shinytheme("journal"),
                                                 
                                                         tags$td(style="width:50%",
                                                                 titlePanel(h2("Sentiment for STM Topics",align="center")))
-                                       )
-                                      )
-                                     )           
+                              )))           
                                
                             ),
-                           
-                           #fluidRow(column(12,
-                          #                 uiOutput("topics_input"))
 
-                           #), # end row
-                           
                            fluidRow(column(12,hr())),
                            
                            fluidRow(
@@ -225,8 +242,47 @@ ui <- fluidPage(theme = shinytheme("journal"),
 # Define server logic ----
 server <- function(input, output) {
   
-  #output$value <- renderPrint({ input$plot1 })
-  #output$type <- renderPrint({class(input$plot1)})
+  # possible to remove duplicate stm model code?
+  
+  output$politicians <- renderDataTable({
+    
+    scrape_politicians <- function() {
+      
+      url <- "https://triagecancer.org/congressional-social-media"
+      xpath <- "/html/body/div[1]/div/div/div/div/div/div[2]"
+      
+      politician_table <- read_html(url) %>% # better way of storing this info??
+        html_nodes(., xpath = xpath) %>%
+        html_table() %>%
+        .[[1]]
+      
+      twitter_info <- politician_table %>%
+        select(State, `Member of Congress`, Name, Party, Twitter) %>%
+        filter(nchar(Twitter) > 1) %>%
+        separate(., Name, c("LName", "FName"), sep = "[,]{0,}+[[:space:]]{1,}") %>%
+        separate(., State, c("State", "District"), sep = "[0-9].*$|At-Large") %>%
+        select(-District)
+      
+      # need to do this 1 column manually as cannot specify andOR in regex separate...
+      # find more elegant solution here still to cove all separate conditions, 
+      # maybe write own function going through each cell checking condition?
+      twitter_info[177,"LName"] <- "LaHood"
+      twitter_info[177,"FName"] <- "Darin"
+      
+      twitter_info <- twitter_info %>%
+        unite(., "name", c(FName,LName), sep = " ")
+      
+      colnames(twitter_info) <- c("State", "Member of Congress", "Name", "Party", "Twitter Handle")
+      
+      return(twitter_info)
+
+    }
+    
+    dat <- scrape_politicians()
+    
+    dat
+    
+  })
   
   output$plot1_p <- renderPlot({ # plot 1
     
@@ -256,8 +312,8 @@ server <- function(input, output) {
       }
     }
     
-    ### make sure to keep colors red blue for Party specific graph
     if (length(plot1_vals)==0){
+      
       group.colours <- c(D = "#333BFF", R = "#FF0000")
       plot1 <- df %>% 
         group_by(data.created_at,Party) %>%
@@ -277,7 +333,9 @@ server <- function(input, output) {
         ylab(as.character(yaxis())) +
         scale_color_manual(values=group.colours)
       plot1
+      
     } else if (length(plot1_vals)>=1&length(plot1_vals)<=5) {
+      
       plot1 <- df %>% 
         group_by(data.created_at,data.username) %>%
         mutate(m_rtweet = mean(data.public_metrics.retweet_count),
@@ -296,11 +354,14 @@ server <- function(input, output) {
         xlab("Time") +
         ylab(as.character(yaxis()))
       plot1
+      
     } else {
+      
       text(x=0.5,y=0.5,"Select between 1 and 5 Units",col="red")
+      
     }
     
-  }) # end plot 1
+  })
   
   output$top_tweets <- renderTable({
     
@@ -323,9 +384,7 @@ server <- function(input, output) {
     
   }, align = "c")
   
-  output$wordcloud <- renderPlot({ # wordcloud function
-    
-    # make such that if NOT selected topic OR NOT selected individual show TWO wordclouds for dem | rep general tokens.
+  output$wordcloud <- renderPlot({
     
     wordcloud_individuals <- input$analysis_units_individual
     wordcloud_topic <- input$analysis_units_topic # add more terms for topics; add method for search "as text" on site?.
@@ -369,8 +428,7 @@ server <- function(input, output) {
       }
       
     } else {
-      #text(x=0.5, y=0.5, paste("Select between 1 and 3 units"), col="red", cex = 1)
-      # show plots for dems and reps for all tokens
+
       wordcloud_df <- df %>% 
         select(data.id,Party,data.created_at,data.text)
       
@@ -427,7 +485,7 @@ server <- function(input, output) {
       
     }
     
-  }) # end wordcloud function
+  })
   
   output$sentiment_topics_vector <- renderTable({
     
@@ -456,9 +514,7 @@ server <- function(input, output) {
       dfm_trim(min_docfreq = 0.075,
                max_docfreq = 0.90,
                docfreq_type = "prop")
-    
-    # stm
-    
+
     stm <- convert(stm_dfm, to = "stm")
     
     model.stm <<- stm(
@@ -484,26 +540,19 @@ server <- function(input, output) {
     topics_keywords <- as.data.frame(t(labelTopics(model.stm, n = 10)$prob))
     colnames(topics_keywords) <- gsub("V", "Topic", x = colnames(topics_keywords))
     
-    # make this global var to use as input or need to sanitize first?
     topics_keywords <- topics_keywords[, colnames(topics_keywords) %in% theta_ordered$dat] 
     
-    # how to make it such that this output is dynamically loaded in memory?
     stm_topic_selection <- as.list(topics_keywords)
     names(stm_topic_selection) <- gsub("(?<=\\D)(?=\\d)", " ", names(stm_topic_selection), perl = TRUE)
     
     as.data.frame(stm_topic_selection, col.names = names(stm_topic_selection), check.names = FALSE)
-    #sentiment_topics <- names(stm_topic_selection)
-    
     
   }, spacing="m", width="100%")
   
   output$sentiment_frequency <- renderPlot({
-    
-    # add frequency graph showing frequency of tweets posted about topic "X" as well
-    
+
     handle <- input$stm_handles
-    topic_count <- 10#as.integer(input$topics_slider)
-    #text(x=0.5,y=0.5,paste(handle),col="red")
+    topic_count <- 10
     
     stm_df <- df %>%
       filter(data.username == as.character(handle))
@@ -527,9 +576,7 @@ server <- function(input, output) {
       dfm_trim(min_docfreq = 0.075,
                max_docfreq = 0.90,
                docfreq_type = "prop")
-    
-    # stm
-    
+
     stm <- convert(stm_dfm, to = "stm")
     
     model.stm <<- stm(
@@ -555,25 +602,13 @@ server <- function(input, output) {
     topics_keywords <- as.data.frame(t(labelTopics(model.stm, n = 10)$prob))
     colnames(topics_keywords) <- gsub("V", "Topic", x = colnames(topics_keywords))
     
-    # make this global var to use as input or need to sanitize first?
     topics_keywords <- topics_keywords[, colnames(topics_keywords) %in% theta_ordered$dat] 
     
-    # how to make it such that this output is dynamically loaded in memory?
     stm_topic_selection <- as.list(topics_keywords)
     names(stm_topic_selection) <- gsub("(?<=\\D)(?=\\d)", " ", names(stm_topic_selection), perl = TRUE)
     
-    # server side for frequency graphs
-    #sentiment_individuals <- as.character(input$sentiment_handles)
     sentiment_topics <- input$sentiment_topics
     keywords <- stm_topic_selection[[sentiment_topics]]
-    
-    #if (keywords == "covid") {
-    #  keywords <- c("covid","covid-19","virus")
-    #} else if (keywords == "Ukraine") {
-    #  keywords <- c("ukraina","ukraine","war")
-    #} else {
-    #  keywords <- c("inflation","stagflation")
-    #}
     
     data_dictionary <- data_dictionary_LSD2015[1:2]
     
@@ -581,8 +616,6 @@ server <- function(input, output) {
     
     sentiment_df <- df %>% 
       filter(data.username %in% input$stm_handles)
-    
-    #head(sentiment_df)
     
     sentiment_text <- sentiment_df$data.text
     sentiment_docvars <- sentiment_df %>% select(-data.text)
@@ -625,24 +658,22 @@ server <- function(input, output) {
     
     # add neutral class
     
-  }) # end sentiment over time plots function
+  })
   
   output$table_descriptive <- renderTable({
     
     df <- data.frame(eval(parse(text=input$select_desc_df)))
     head(df)
     
-  }) # end descriptive tables function
+  })
   
   
   
   output$stm_topics <- renderPlot({
-    
-    # input candidate
+
     handle <- input$stm_handles
-    topic_count <- 10#as.integer(input$topics_slider)
-    #text(x=0.5,y=0.5,paste(handle),col="red")
-    
+    topic_count <- 10
+
     stm_df <- df %>%
       filter(data.username == as.character(handle))
     
@@ -665,9 +696,7 @@ server <- function(input, output) {
       dfm_trim(min_docfreq = 0.075,
                max_docfreq = 0.90,
                docfreq_type = "prop")
-    
-    # stm
-    
+
     stm <- convert(stm_dfm, to = "stm")
     
     model.stm <<- stm(
@@ -687,11 +716,7 @@ server <- function(input, output) {
       main = title_plot,
       xlab = "Share estimation"
     )
-    
-    # compute most salient topics to use for further analysis selection
-    # or take from yougov survey instead??
-    # aggregate thetas for each topic by mean(), then keep top 5 topics and find their respective keywords.
-    
+
     dt <- make.dt(model.stm)
     theta <-  dt %>%
       apply(.,2,mean) %>%
@@ -707,16 +732,10 @@ server <- function(input, output) {
     topics_keywords <- as.data.frame(t(labelTopics(model.stm, n = 10)$prob))
     colnames(topics_keywords) <- gsub("V", "Topic", x = colnames(topics_keywords))
     
-    # make this global var to use as input or need to sanitize first?
     topics_keywords <- topics_keywords[, colnames(topics_keywords) %in% theta_ordered$dat] 
     
-    # how to make it such that this output is dynamically loaded in memory?
     stm_topic_selection <- as.list(topics_keywords)
-    names(stm_topic_selection) <- gsub("(?<=\\D)(?=\\d)", " ", names(stm_topic_selection), perl = TRUE) # maybe make global
-    
-    # output top n topics to global variable as input for sentiment dicitonary plot
-    # make list such that can be used in widget for selecting topics for sentiment graph over time.
-    # also show p. 20 model on STM vignette
+    names(stm_topic_selection) <- gsub("(?<=\\D)(?=\\d)", " ", names(stm_topic_selection), perl = TRUE)
     
   })
   
@@ -724,6 +743,7 @@ server <- function(input, output) {
     
     handle <- input$stm_handles
     topic_count <- 10
+    
     stm_df <- df %>%
       filter(data.username == as.character(handle))
     
@@ -746,9 +766,7 @@ server <- function(input, output) {
       dfm_trim(min_docfreq = 0.075,
                max_docfreq = 0.90,
                docfreq_type = "prop")
-    
-    # stm
-    
+
     stm <- convert(stm_dfm, to = "stm")
     
     model.stm <- stm(
@@ -774,10 +792,8 @@ server <- function(input, output) {
     topics_keywords <- as.data.frame(t(labelTopics(model.stm, n = 10)$prob))
     colnames(topics_keywords) <- gsub("V", "Topic", x = colnames(topics_keywords))
     
-    # make this global var to use as input or need to sanitize first?
     topics_keywords <- topics_keywords[, colnames(topics_keywords) %in% theta_ordered$dat] 
     
-    # how to make it such that this output is dynamically loaded in memory?
     stm_topic_selection <- as.list(topics_keywords)
     names(stm_topic_selection) <- gsub("(?<=\\D)(?=\\d)", " ", names(stm_topic_selection), perl = TRUE)
     
@@ -791,6 +807,10 @@ server <- function(input, output) {
 
 # Run the app ----
 shinyApp(ui = ui, server = server)
+
+
+
+
 
 
 
