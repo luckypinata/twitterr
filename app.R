@@ -1,12 +1,10 @@
 require(stringr)
 require(stringi)
-require(httr)
 require(jsonlite)
 require(plyr)
 require(DBI)
 require(RSQLite)
 require(dplyr)
-require(rvest)
 require(tidyr)
 require(quanteda.textplots)
 require(quanteda.corpora)
@@ -17,7 +15,6 @@ require(wordcloud)
 require(RColorBrewer)
 require(stm)
 require(stminsights)
-require(readxl)
 
 require(shiny) 
 require(shinydashboard)
@@ -25,8 +22,11 @@ require(shinythemes)
 require(purrr)
 
 setwd("~/dev/unlucky/app") # remove in prod.
-df <- read.csv("data/df.csv") # change to SQL command?
 
+db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite")
+df <- dbGetQuery(db, "SELECT * FROM tweets")
+dbDisconnect(db)
+  
 ui <- fluidPage(theme = shinytheme("yeti"),
       
                 navbarPage(
@@ -773,7 +773,7 @@ server <- function(input, output) {
       stm$documents,
       stm$vocab,
       K = topic_count,
-      data = stm$meta,
+      data = stm$meta, 
       init.type = "Spectral"
     )
     
@@ -807,6 +807,7 @@ server <- function(input, output) {
 
 # Run the app ----
 shinyApp(ui = ui, server = server)
+
 
 
 
