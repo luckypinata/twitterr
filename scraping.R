@@ -9,14 +9,19 @@ require(RSQLite)
 require(dplyr)
 require(rvest)
 require(tidyr)
+require(log4r)
 
-library(shiny)
-library(shinydashboard)
-library(purrr)
+my_logfile = "logfile.txt"
 
-#########################################
-# (1) Data Scraping and Structuring (1) #
-#########################################
+my_console_appender = console_appender(layout = default_log_layout())
+my_file_appender = file_appender(my_logfile, append = TRUE, 
+                                 layout = default_log_layout())
+
+my_logger <- log4r::logger(threshold = "INFO", 
+                           appenders= list(my_console_appender,my_file_appender))
+
+log4r::info(my_logger, "Info_message.")
+log4r::error(my_logger, "Error_message")
 
 scrape_politicians <- function() {
   
@@ -54,7 +59,7 @@ clean_politicians <- function() {
   
 }
 
-scrape_twitter <- function() {
+scrape_twitter <- function(last_date = NULL) {
   
   # get politicians' handles
   scrape_politicians()
@@ -64,7 +69,8 @@ scrape_twitter <- function() {
   unique_politicians <- gsub("@", "", unique_politicians)
   unique_politicians <- unique_politicians[1:2] ### remove this in production
   
-  bearer_token <- read.delim("bearer.txt",header = FALSE) %>% as.character()
+  bearer_token <- read.delim("bearer.txt", header = FALSE) %>% 
+    as.character()
   
   headers <- c(`Authorization` = sprintf('Bearer %s', bearer_token))
   
@@ -92,28 +98,16 @@ scrape_twitter <- function() {
     
     print(head(ids[[i]]))
     
-    Sys.sleep(1) # rate limits?? write helper function to check rate limit usage?
-    
-    #print(obj)
+    Sys.sleep(2) # rate limits?? write helper function to check rate limit usage?
     
   }
-  
-  #for (i in 1:length(ids)) {
-    
-    # json_data <- fromJSON(obj, flatten = TRUE) %>% as.data.frame
-    
-    #ids[[i]] <- fromJSON(ids[[i]], flatten = TRUE) %>% as.data.frame()
-    
-    #head(ids[[i]])
-    
-  #}
   
   ids_bind <- bind_rows(ids)
   users_table <<- ids_bind
   
   unique_ids <- unique(ids_bind$data.id)
   
-  unique_ids <- unique_ids[1:2] ### for testing, remove when prod.
+  unique_ids <- unique_ids[1:2] ### for testing, remove ###
   
   tweets <- list()
   
@@ -144,10 +138,10 @@ scrape_twitter <- function() {
     
     repeat { # make this more efficient
       
-      if (is.null(next_token) == FALSE & j < 5) { # remove & j < 5 condition, just for testing
+      if (!is.null(next_token) & j < 5) { # remove & j < 5 condition, just for testing
         
-        print(j) # for debugging
-        print(next_token) # for debugging
+        #print(j) # for debugging
+        #print(next_token) # for debugging
         
         params = list(`pagination_token` = next_token,
                       `tweet.fields` = 'created_at,public_metrics')
@@ -165,7 +159,7 @@ scrape_twitter <- function() {
         
       } else {
         
-        break # make sure to exit loop when no more need to paginate
+        break 
         
       }
       
@@ -174,32 +168,149 @@ scrape_twitter <- function() {
     final_obj <- bind_rows(user_tweets)
     final_obj$user_id <- as.character(unique_ids[i]) # add user id for SQL formatting
     
-    message(nrow(final_obj)) # instead write to logfile
+    message(nrow(final_obj)) 
     message(head(final_obj))
     
     tweets[[i]] <- final_obj
     
   }
   
+  if (is.null(last_date)) {
+    
   tweets_final <<- bind_rows(tweets) %>%
-    select(-c(meta.result_count,meta.newest_id,meta.oldest_id,meta.next_token,meta.previous_token)) # remove unnecessary fields
+    select(-c(meta.result_count,meta.newest_id,meta.oldest_id,meta.next_token,meta.previous_token)) 
+  
+  } else {
+    
+    tweets_final <<- bind_rows(tweets) %>%
+      select(-c(meta.result_count,meta.newest_id,meta.oldest_id,meta.next_token,meta.previous_token))
+    
+    tweets_final$data.created_at <<- as.Date(tweets_final$data.created_at)
+    
+    for (i in last_date$user_id) {
+      
+      pair <- last_date %>%
+        filter(user_id == i)
+      
+      tweets_final <<- tweets_final %>%
+        filter(user_id == i & data.created_at > pair$data.created_at)
+      
+    }
+    
+  }
+  
+  final_users_table <- merge(twitter_info, users_table, by.x = "name", by.y = "data.name", all=TRUE) %>% # what do i even use this for?
+    select(-c(Twitter, data.description))
+
+  # filter out retweets
+  tweets_final <<- tweets_final %>%
+    filter(!stri_detect_regex(data.text, '^RT\\s@[a-zA-Z0-9_]{1,15}:')) # maybe better regex?
+  
+  if (is.null(last_date)) {
+  
+  message(paste("New entries: ", nrow(tweets_final)))
+  db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite")
+  dbWriteTable(db, "tweets", tweets_final)
+  dbWriteTable(db, "users", final_users_table)
+  
+  } else {
+    
+    db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite")
+    message(paste("New entries: ", nrow(tweets_final)))
+    dbAppendTable(db, "tweets", tweets_final)
+    
+  }
+  
+  dbDisconnect(db)
   
 }
 
-scrape_twitter() # call scraping function for tweets
+mem_helper <- function() {
+  
+  env <- ls()
+  
+  for (i in env) {
+    
+    print(i)
+    
+    if (i == "db") {
+      
+      dbDisconnect(eval(parse(text=i)))
+      
+    } else {
+      
+      rm(eval(parse(text=i)))
+      
+    }
+    
+  }
+  
+  gc()
+  
+}
+  
+db_maintainer <- function() {
+  
+  db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite")
+  tables <- dbListTables(db)
+  
+  if (length(tables) == 0) {
+    
+    message(paste("Scraping ALL dates"))
+    
+    dbDisconnect(db)
+    scrape_twitter(last_date = NULL)
+    
+  } else {
 
-# merge twitter_info and users_table
-final_users_table <- merge(twitter_info, users_table, by.x = "name", by.y = "data.name", all=TRUE) %>% 
-  select(-c(Twitter, data.description))
+    tweets <- dbGetQuery(db, "SELECT `user_id`,`data.created_at` FROM tweets")
+    dbDisconnect(db)
+    
+    tweets$data.created_at <- as.Date(tweets$data.created_at)
+    
+    MR_tweet_dt <- tweets %>%
+      group_by(user_id) %>%
+      top_n(1,data.created_at)
+    
+    message(paste("Scraping dates: \n"))
+    message(MR_tweet_dt[1])
+    
+    scrape_twitter(last_date = MR_tweet_dt)
 
-# clear memory of unneeded tables
-rm(users_table)
-rm(twitter_info)
-rm(politician_table)
+  }
+  
+  mem_helper()
+  gc()
+  
+}
 
-# filter out retweets
-tweets_final <- tweets_final %>%
-  filter(!stri_detect_regex(data.text, '^RT\\s@[a-zA-Z0-9_]{1,15}:')) # maybe better regex?
+db_maintainer()
+mem_helper()
 
-# call garbage collector to free mem
-gc()
+while (TRUE) {
+  
+  Sys.sleep(604800) # scraping once a week
+  
+  message(paste("Starting scraping @ ", Sys.Date(), " ", Sys.time()))
+  
+  start_time <- Sys.time()
+  
+  db_maintainer()
+  
+  mem_helper()
+  
+  end_time <- Sys.time()
+  
+  message(paste("Time taken for scraping: ", end_time-start_time, " \n"))
+
+}
+
+
+
+
+
+
+
+
+
+
