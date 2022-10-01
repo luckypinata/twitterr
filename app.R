@@ -6,40 +6,61 @@ require(DBI)
 require(RSQLite)
 require(dplyr)
 require(tidyr)
-require(quanteda.textplots)
-require(quanteda.corpora)
-require(quanteda.textstats)
 require(quanteda)
+require(quanteda.textplots)
+require(quanteda.textstats)
+require(quanteda.corpora)
 require(ggplot2)
 require(wordcloud)
 require(RColorBrewer)
 require(stm)
-require(stminsights)
+require(rvest)
 
 require(shiny) 
 require(shinydashboard)
 require(shinythemes)
 require(purrr)
 
-setwd("~/dev/unlucky/app") # remove in prod.
+### results table for the model results then simply query this table instead of recomputing it every time. ###
+setwd("/Users/gummoxxx/dev/unlucky/app")
+#setwd("/srv/shiny-server")
+print(system("ls"))
+message(getwd())
 
-db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite")
-df <- dbGetQuery(db, "SELECT * FROM tweets")
+db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite") # this query doesnt work, probably because of datatypes of columns
+
+users <- dbGetQuery(db,"SELECT * FROM users")
+print(nrow(users))
+tweets <-dbGetQuery(db,"SELECT * FROM tweets")
+print(nrow(tweets))
+
+df <- merge(users,tweets,by.x="data.id",by.y="user_id",all=TRUE)
+print(nrow(df))
+
+# the fucking lord knows why this doesn't work.
+#df <- dbGetQuery(db, "SELECT * FROM users 
+#                      LEFT JOIN tweets
+#                      ON \"users.data.id\" = \"tweets.user_id\"
+#                 ") 
+
 dbDisconnect(db)
-  
+
 ui <- fluidPage(theme = shinytheme("yeti"),
-      
+                
                 navbarPage(
                   
                   "TWITTERR",
                   
                   tabPanel("Home",
+                           
                            fluidRow(
                              column(12,
                                     tags$body(" The aim of this application is to allow easy analysis of politicians' sentiments on specific topics.
                                               The data used has been scraped of Twitter, for all available public profiles maintained by current members of congress, in both the house and senate.
-                                               The available individuals and some descriptive information is presented below. 
+                                               The available individuals and some descriptive information is presented in the \"Politicians\" tab below..
                                               "),
+                                    br(),
+                                    br(),
                                     style= "text-align: .h3; color: black")
                            ),
                            
@@ -49,25 +70,31 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                              column(12,
                                     tags$body(" The associated tweets are scraped, structured and stored automatically by the server, updating continuously as new data is created. The analytics tab then allows
                                               the user to run this corpus of filtered tweets through a sentiment algorithm to determine the prevalence of important topics, as well as the accompanying sentiment
-                                              on said topic by a given individual."),
+                                              on said topic by a given individual. The code running the database and scraping operations is included in the \"Code\" tab below."),
                                     style= "text-align: .h3; color: black")
-                                    
+                             
+                           ),
+                           
+                           br(),
+                           br(),
+                           
+                           fluidRow(
+                             
+                             tabsetPanel(
+                               tabPanel("Politicians",
+                                        dataTableOutput(outputId = "politicians")),
+                               tabPanel("Code",
+                                        includeMarkdown("script.Rmd"))
+                             )
                            ),
                            
                            fluidRow(column(12,hr())),
-                           
-                           fluidRow(
-                             column(12,align="center",
-                                    dataTableOutput(outputId = "politicians"))
-                           ),
-                           
-                           fluidRow(column(12,hr()))
-                           # add some of the scraping code and explain
+                           br()
                            # add US state map and show freq of tweets by region and party.
                   ), # end tab 1
                   
                   tabPanel("Descriptive",
-
+                           
                            fluidRow(
                              column(12,
                                     tags$body(" The following graphic allows you to select one variable from the dropdown menu, as well as up to 5 individuals for comparison on the selected variable. The computed values for the y-axis are different metrics averaged for the tweets corresponding to day d and indivdual i over time. The variable \"Overall\" corresponds to a mean measurement of all different metrics for individual i. The table below simply shows the all time top tweets in the entire dataset by overall interaction score."),
@@ -95,14 +122,14 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                              mainPanel(
                                div(plotOutput(outputId = "plot1_p", width = "100%"), style="align-text: left;")
                              )
-                           ),# end tab 1 row 1
+                           ),
                            
                            fluidRow(column(12,hr())),
                            
                            fluidRow(
                              column(12,align="center",
-                                           tableOutput(outputId = "top_tweets")
-                                    )
+                                    tableOutput(outputId = "top_tweets")
+                             )
                            ),
                            
                            fluidRow(column(12,hr()))
@@ -148,17 +175,24 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                                                 In later versions of this app, tools for measurement of latent variables will be added as well.
                                               Specifically, the topic model uses the Structural Topic Model (STM) framework, which allows for the accommodation of corpus structure through the use of document level covariates which may affect topical prevalence and content.
                                               The heuristics of the formal processes involved are shown in the figure below, which is taken from "),
-                                    tags$a(href="https://cran.r-project.org/web/packages/stm/vignettes/stmVignette.pdf", "Roberts et al. (2019): "),
+                                    tags$a(href="https://cran.r-project.org/web/packages/stm/vignettes/stmVignette.pdf", "Roberts et al. (2019)."),
+                                    tags$body("The flow of the application is as follows:"),
+                                    br(),
+                                    br(),
+                                    tags$body("(1) pick a handle which is of interest, and select it below to generate a list of topics."),
+                                    br(),
+                                    tags$body("(2) select the desired topic of interest (based on the generated keywords in the table below)
+                                              in the drop-down menu, which will return the computed sentiment over time for said topic in the corpus of the given individual handle."),
                                     style= "text-align: .h3; color: black")
-                            ),
-                             
+                           ),
+                           
                            fluidRow(column(12,hr())),
                            
                            fluidRow(
-                           column(12, align="center",
-                                  HTML('<img src="stm.png",  
+                             column(12, align="center",
+                                    HTML('<img src="stm.png",  
                                          style="text-align: center;"/>','<p style="text-align: center"></p>')
-                                  )
+                             )
                            ),
                            
                            fluidRow(column(12,hr())),
@@ -166,25 +200,23 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                            fluidRow(
                              column(12, align="center",
                                     tags$table(style="width:100%",
-                                      tags$tr(tags$td(style="width:50%",
-                                                        selectInput("stm_handles", label = h3("Select Handle"),
-                                                          choices = unique(na.omit(df$data.username))),align="center"),
-                                              tags$td(style="width:50%",
-                                                titlePanel(h2("STM Topics and Keywords",align="center")))
-                            ))) 
+                                               tags$tr(tags$td(style="width:50%",
+                                                               selectInput("stm_handles", label = h3("Select Handle"),
+                                                                           choices = unique(na.omit(df$data.username))),align="center"),
+                                                       tags$td(style="width:50%",
+                                                               titlePanel(h2("STM Topics and Keywords",align="center")))
+                                               ))) 
                            ),
                            
                            fluidRow(column(12,hr())),
-
+                           
                            fluidRow(
                              column(width = 12, align="center",
-                                tableOutput(outputId = "sentiment_topics_vector")
+                                    tableOutput(outputId = "sentiment_topics_vector")
                              )
                            ),
                            
                            fluidRow(column(12,hr())),
-                          
-                          
                            
                            fluidRow(
                              
@@ -196,24 +228,24 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                            
                            fluidRow(
                              column(12,
-                                    tags$body(" The figures below show (1) show the frequancy of the topics computed above for any candidate/handle, and (2) present the computed difference between both frequencies to represent overall sentiment for indviual i and topic j over time."),
+                                    tags$body(" The figures below show (1) show the frequency of the topics computed above for any candidate/handle, and (2) present the computed difference between both frequencies to represent overall sentiment for indviual i and topic j over time."),
                                     style= "text-align: .h3; color: black")
                            ),
                            
                            fluidRow(column(12,hr())),
-                          
-                            fluidRow(
-                              column(12, align="center",
-                                     tags$table(style="width:100%",
-                                                tags$tr(tags$td(style="width:50%",
-                                                                uiOutput("topics_input"),align="center"),
-                                                
-                                                        tags$td(style="width:50%",
-                                                                titlePanel(h2("Sentiment for STM Topics",align="center")))
-                              )))           
-                               
-                            ),
-
+                           
+                           fluidRow(
+                             column(12, align="center",
+                                    tags$table(style="width:100%",
+                                               tags$tr(tags$td(style="width:50%",
+                                                               uiOutput("topics_input"),align="center"),
+                                                       
+                                                       tags$td(style="width:50%",
+                                                               titlePanel(h2("Sentiment for STM Topics",align="center")))
+                                               )))           
+                             
+                           ),
+                           
                            fluidRow(column(12,hr())),
                            
                            fluidRow(
@@ -243,6 +275,24 @@ ui <- fluidPage(theme = shinytheme("yeti"),
 server <- function(input, output) {
   
   # possible to remove duplicate stm model code?
+
+  #scraper_master <- function(time){ # swap this for CRON job
+  #  if (format(Sys.time(), "%H:%M") == time) {
+  #    tryCatch(
+  #      expr = {
+  #        source("./scraping.R")
+  #        message("Successfully completed scraping.")
+  #      },
+  #      error = function(e) {
+  #        message("Error while running scraping.R")
+  #        print(e)
+  #      }, 
+  #      finally = {message("Whatever.")}
+  #    )
+  #  }
+  #}
+  
+  #scraper_master("17:01") # calling scraping function
   
   output$politicians <- renderDataTable({
     
@@ -275,7 +325,7 @@ server <- function(input, output) {
       colnames(twitter_info) <- c("State", "Member of Congress", "Name", "Party", "Twitter Handle")
       
       return(twitter_info)
-
+      
     }
     
     dat <- scrape_politicians()
@@ -286,7 +336,7 @@ server <- function(input, output) {
   
   output$plot1_p <- renderPlot({ # plot 1
     
-    thematic::thematic_shiny()
+    #thematic::thematic_shiny()
     
     plot1_vals <- input$plot1_selection_handles
     plot1_vars <- input$plot1_selection_variables
@@ -312,6 +362,8 @@ server <- function(input, output) {
       }
     }
     
+    df$data.created_at <- as.Date(df$data.created_at)
+    
     if (length(plot1_vals)==0){
       
       group.colours <- c(D = "#333BFF", R = "#FF0000")
@@ -334,7 +386,7 @@ server <- function(input, output) {
         scale_color_manual(values=group.colours)
       plot1
       
-    } else if (length(plot1_vals)>=1&length(plot1_vals)<=5) {
+    } else if (length(plot1_vals)>0 & length(plot1_vals)<=5) {
       
       plot1 <- df %>% 
         group_by(data.created_at,data.username) %>%
@@ -428,7 +480,7 @@ server <- function(input, output) {
       }
       
     } else {
-
+      
       wordcloud_df <- df %>% 
         select(data.id,Party,data.created_at,data.text)
       
@@ -514,7 +566,7 @@ server <- function(input, output) {
       dfm_trim(min_docfreq = 0.075,
                max_docfreq = 0.90,
                docfreq_type = "prop")
-
+    
     stm <- convert(stm_dfm, to = "stm")
     
     model.stm <<- stm(
@@ -550,7 +602,7 @@ server <- function(input, output) {
   }, spacing="m", width="100%")
   
   output$sentiment_frequency <- renderPlot({
-
+    
     handle <- input$stm_handles
     topic_count <- 10
     
@@ -576,7 +628,7 @@ server <- function(input, output) {
       dfm_trim(min_docfreq = 0.075,
                max_docfreq = 0.90,
                docfreq_type = "prop")
-
+    
     stm <- convert(stm_dfm, to = "stm")
     
     model.stm <<- stm(
@@ -670,10 +722,10 @@ server <- function(input, output) {
   
   
   output$stm_topics <- renderPlot({
-
+    
     handle <- input$stm_handles
     topic_count <- 10
-
+    
     stm_df <- df %>%
       filter(data.username == as.character(handle))
     
@@ -696,7 +748,7 @@ server <- function(input, output) {
       dfm_trim(min_docfreq = 0.075,
                max_docfreq = 0.90,
                docfreq_type = "prop")
-
+    
     stm <- convert(stm_dfm, to = "stm")
     
     model.stm <<- stm(
@@ -716,7 +768,7 @@ server <- function(input, output) {
       main = title_plot,
       xlab = "Share estimation"
     )
-
+    
     dt <- make.dt(model.stm)
     theta <-  dt %>%
       apply(.,2,mean) %>%
@@ -766,7 +818,7 @@ server <- function(input, output) {
       dfm_trim(min_docfreq = 0.075,
                max_docfreq = 0.90,
                docfreq_type = "prop")
-
+    
     stm <- convert(stm_dfm, to = "stm")
     
     model.stm <- stm(
@@ -802,7 +854,7 @@ server <- function(input, output) {
                 selected = stm_topic_selection[1])
     
   })
-
+  
 } # end server
 
 # Run the app ----

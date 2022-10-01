@@ -11,6 +11,8 @@ require(rvest)
 require(tidyr)
 require(log4r)
 
+#setwd("/Users/gummoxxx/Documents/dev/twitterr_app/test01")
+
 my_logfile = "logfile.txt"
 
 my_console_appender = console_appender(layout = default_log_layout())
@@ -33,13 +35,9 @@ scrape_politicians <- function() {
     html_table() %>%
     .[[1]]
   
-  #write.csv2(table, "twitter_info.csv")
-  
 }
 
 clean_politicians <- function() {
-  
-  # read file name corresponding to current date
   
   twitter_info <<- politician_table %>%
     select(State, `Member of Congress`, Name, Party, Twitter) %>%
@@ -60,15 +58,13 @@ clean_politicians <- function() {
 }
 
 scrape_twitter <- function(last_date = NULL) {
-  
-  # get politicians' handles
+
   scrape_politicians()
   clean_politicians()
   
   unique_politicians <- unique(twitter_info$Twitter)
   unique_politicians <- gsub("@", "", unique_politicians)
-  unique_politicians <- unique_politicians[1:2] ### remove this in production
-  
+
   bearer_token <- read.delim("bearer.txt", header = FALSE) %>% 
     as.character()
   
@@ -96,9 +92,9 @@ scrape_twitter <- function(last_date = NULL) {
       fromJSON(flatten = TRUE) %>%
       as.data.frame()
     
-    print(head(ids[[i]]))
+    #print(head(ids[[i]]))
     
-    Sys.sleep(2) # rate limits?? write helper function to check rate limit usage?
+    Sys.sleep(2) 
     
   }
   
@@ -106,8 +102,6 @@ scrape_twitter <- function(last_date = NULL) {
   users_table <<- ids_bind
   
   unique_ids <- unique(ids_bind$data.id)
-  
-  unique_ids <- unique_ids[1:2] ### for testing, remove ###
   
   tweets <- list()
   
@@ -136,13 +130,10 @@ scrape_twitter <- function(last_date = NULL) {
     
     j <- 2
     
-    repeat { # make this more efficient
+    repeat {
       
-      if (!is.null(next_token) & j < 5) { # remove & j < 5 condition, just for testing
-        
-        #print(j) # for debugging
-        #print(next_token) # for debugging
-        
+      if (!is.null(next_token)) {
+
         params = list(`pagination_token` = next_token,
                       `tweet.fields` = 'created_at,public_metrics')
         
@@ -166,10 +157,7 @@ scrape_twitter <- function(last_date = NULL) {
     }
     
     final_obj <- bind_rows(user_tweets)
-    final_obj$user_id <- as.character(unique_ids[i]) # add user id for SQL formatting
-    
-    message(nrow(final_obj)) 
-    message(head(final_obj))
+    final_obj$user_id <- as.character(unique_ids[i])
     
     tweets[[i]] <- final_obj
     
@@ -177,9 +165,9 @@ scrape_twitter <- function(last_date = NULL) {
   
   if (is.null(last_date)) {
     
-  tweets_final <<- bind_rows(tweets) %>%
-    select(-c(meta.result_count,meta.newest_id,meta.oldest_id,meta.next_token,meta.previous_token)) 
-  
+    tweets_final <<- bind_rows(tweets) %>%
+      select(-c(meta.result_count,meta.newest_id,meta.oldest_id,meta.next_token,meta.previous_token)) 
+    
   } else {
     
     tweets_final <<- bind_rows(tweets) %>%
@@ -199,20 +187,22 @@ scrape_twitter <- function(last_date = NULL) {
     
   }
   
-  final_users_table <- merge(twitter_info, users_table, by.x = "name", by.y = "data.name", all=TRUE) %>% # what do i even use this for?
+  final_users_table <<- merge(twitter_info, users_table, by.x = "name", by.y = "data.name", all=TRUE) %>% # what do i even use this for? remove global, just for testing 
     select(-c(Twitter, data.description))
-
+  final_users_table$data.id <- as.character(final_users_table$data.id)
+  
   # filter out retweets
-  tweets_final <<- tweets_final %>%
+  tweets_final <- tweets_final %>% # need global here?
     filter(!stri_detect_regex(data.text, '^RT\\s@[a-zA-Z0-9_]{1,15}:')) # maybe better regex?
+  tweets_final$user_id <- as.character(tweets_final$user_id)
   
   if (is.null(last_date)) {
-  
-  message(paste("New entries: ", nrow(tweets_final)))
-  db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite")
-  dbWriteTable(db, "tweets", tweets_final)
-  dbWriteTable(db, "users", final_users_table)
-  
+    
+    message(paste("New entries: ", nrow(tweets_final)))
+    db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite")
+    dbWriteTable(db, "tweets", tweets_final)
+    dbWriteTable(db, "users", final_users_table)
+    
   } else {
     
     db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite")
@@ -225,7 +215,7 @@ scrape_twitter <- function(last_date = NULL) {
   
 }
 
-mem_helper <- function() {
+mem_helper <- function() { # doesnt help w/ shit...
   
   env <- ls()
   
@@ -248,7 +238,7 @@ mem_helper <- function() {
   gc()
   
 }
-  
+
 db_maintainer <- function() {
   
   db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite")
@@ -256,13 +246,13 @@ db_maintainer <- function() {
   
   if (length(tables) == 0) {
     
-    message(paste("Scraping ALL dates"))
+    message(paste("No data in SQLite DB ... \nScraping ALL dates"))
     
     dbDisconnect(db)
     scrape_twitter(last_date = NULL)
     
   } else {
-
+    
     tweets <- dbGetQuery(db, "SELECT `user_id`,`data.created_at` FROM tweets")
     dbDisconnect(db)
     
@@ -276,7 +266,7 @@ db_maintainer <- function() {
     message(MR_tweet_dt[1])
     
     scrape_twitter(last_date = MR_tweet_dt)
-
+    
   }
   
   mem_helper()
@@ -284,31 +274,25 @@ db_maintainer <- function() {
   
 }
 
+
+
+#while (TRUE) {
+  
+message(paste("Starting scraping @ ", Sys.Date(), " ", Sys.time()))
+  
+start_time <- Sys.time()
+  
 db_maintainer()
+  
 mem_helper()
-
-while (TRUE) {
   
-  Sys.sleep(604800) # scraping once a week
-  
-  message(paste("Starting scraping @ ", Sys.Date(), " ", Sys.time()))
-  
-  start_time <- Sys.time()
-  
-  db_maintainer()
-  
-  mem_helper()
-  
-  end_time <- Sys.time()
-  
-  message(paste("Time taken for scraping: ", end_time-start_time, " \n"))
+end_time <- Sys.time()
 
-}
+message(paste("Time taken for scraping: ", end_time-start_time, " \n"))
 
-
-
-
-
+#  Sys.sleep(604800) # scraping once a week
+  
+#}
 
 
 
