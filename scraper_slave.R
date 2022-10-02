@@ -1,0 +1,287 @@
+
+require(stringr)
+require(stringi)
+require(httr)
+require(jsonlite)
+require(plyr)
+require(DBI)
+require(RSQLite)
+require(dplyr)
+require(rvest)
+require(tidyr)
+
+setwd("/srv/shiny-server")
+
+scrape_politicians <- function() {
+  
+  url <- "https://triagecancer.org/congressional-social-media"
+  xpath <- "/html/body/div[1]/div/div/div/div/div/div[2]"
+  
+  politician_table <<- read_html(url) %>% # better way of storing this info??
+    html_nodes(., xpath = xpath) %>%
+    html_table() %>%
+    .[[1]]
+  
+}
+
+clean_politicians <- function() {
+  
+  twitter_info <<- politician_table %>%
+    select(State, `Member of Congress`, Name, Party, Twitter) %>%
+    filter(nchar(Twitter) > 1) %>%
+    separate(., Name, c("LName", "FName"), sep = "[,]{0,}+[[:space:]]{1,}") %>%
+    separate(., State, c("State", "District"), sep = "[0-9].*$|At-Large") %>%
+    select(-District)
+  
+  # need to do this 1 olumn manually as cannot specify andOR in regex separate...
+  # find more elegant solution here still to cove all separate conditions, 
+  # maybe write own function going through each cell checking condition?
+  twitter_info[177,"LName"] <<- "LaHood"
+  twitter_info[177,"FName"] <<- "Darin"
+  
+  twitter_info <<- twitter_info %>%
+    unite(., "name", c(FName,LName), sep = " ")
+  
+}
+
+scrape_twitter <- function(last_date = NULL) {
+
+  scrape_politicians()
+  clean_politicians()
+  
+  unique_politicians <- unique(twitter_info$Twitter)
+  unique_politicians <- gsub("@", "", unique_politicians)
+
+  bearer_token <- read.delim("bearer.txt", header = FALSE) %>% 
+    as.character()
+  
+  headers <- c(`Authorization` = sprintf('Bearer %s', bearer_token))
+  
+  ids <- list()
+  
+  for (i in 1:length(unique_politicians)) {
+    
+    handle <- unique_politicians[i]
+    
+    print(handle)
+    
+    url_handle <- sprintf('https://api.twitter.com/2/users/by?usernames=%s', handle)
+    
+    params = list(
+      `user.fields` = 'id,name,username,description'
+    )
+    
+    response <- httr::GET(url = url_handle,
+                          httr::add_headers(.headers = headers),
+                          query = params)
+    
+    ids[[i]] <- httr::content(response, as = "text") %>%
+      fromJSON(flatten = TRUE) %>%
+      as.data.frame()
+    
+    #print(head(ids[[i]]))
+    
+    Sys.sleep(2) 
+    
+  }
+  
+  ids_bind <- bind_rows(ids)
+  users_table <<- ids_bind
+  
+  unique_ids <- unique(ids_bind$data.id)
+  
+  tweets <- list()
+  
+  for (i in 1:length(unique_ids)) { 
+    
+    user_tweets <- list()
+    
+    id <- unique_ids[i]
+    
+    print(id)
+    
+    url_handle <- sprintf("https://api.twitter.com/2/users/%s/tweets", id)
+    
+    initial_params <- list(`tweet.fields` = 'created_at,public_metrics')
+    
+    initial_response <- httr::GET(url = url_handle,
+                                  httr::add_headers(.headers = headers),
+                                  query = initial_params) %>%
+      httr::content(as="text") %>%
+      fromJSON(flatten=TRUE) %>%
+      as.data.frame()
+    
+    user_tweets[[1]] <- initial_response
+    
+    next_token <- initial_response$meta.next_token[1]
+    
+    j <- 2
+    
+    repeat {
+      
+      if (!is.null(next_token)) {
+
+        params = list(`pagination_token` = next_token,
+                      `tweet.fields` = 'created_at,public_metrics')
+        
+        user_tweets[[j]] <- httr::GET(url = url_handle,
+                                      httr::add_headers(.headers = headers),
+                                      query = params) %>%
+          httr::content(as="text") %>%
+          fromJSON(flatten=TRUE) %>%
+          as.data.frame()
+        
+        next_token <- user_tweets[[j]]$meta.next_token[1]
+        
+        j <- j + 1
+        
+      } else {
+        
+        break 
+        
+      }
+      
+    }
+    
+    final_obj <- bind_rows(user_tweets)
+    final_obj$user_id <- as.character(unique_ids[i])
+    
+    tweets[[i]] <- final_obj
+    
+  }
+  
+  if (is.null(last_date)) {
+    
+    tweets_final <<- bind_rows(tweets) %>%
+      select(-c(meta.result_count,meta.newest_id,meta.oldest_id,meta.next_token,meta.previous_token)) 
+    
+  } else {
+    
+    tweets_final <<- bind_rows(tweets) %>%
+      select(-c(meta.result_count,meta.newest_id,meta.oldest_id,meta.next_token,meta.previous_token))
+    
+    tweets_final$data.created_at <<- as.Date(tweets_final$data.created_at)
+    
+    for (i in last_date$user_id) {
+      
+      pair <- last_date %>%
+        filter(user_id == i)
+      
+      tweets_final <<- tweets_final %>%
+        filter(user_id == i & data.created_at > pair$data.created_at)
+      
+    }
+    
+  }
+  
+  final_users_table <<- merge(twitter_info, users_table, by.x = "name", by.y = "data.name", all=TRUE) %>% # what do i even use this for? remove global, just for testing 
+    select(-c(Twitter, data.description))
+  final_users_table$data.id <- as.character(final_users_table$data.id)
+  
+  # filter out retweets
+  tweets_final <- tweets_final %>% # need global here?
+    filter(!stri_detect_regex(data.text, '^RT\\s@[a-zA-Z0-9_]{1,15}:')) # maybe better regex?
+  tweets_final$user_id <- as.character(tweets_final$user_id)
+  
+  if (is.null(last_date)) {
+    
+    message(paste("New entries: ", nrow(tweets_final)))
+    db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite")
+    dbWriteTable(db, "tweets", tweets_final)
+    dbWriteTable(db, "users", final_users_table)
+    
+  } else {
+    
+    db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite")
+    message(paste("New entries: ", nrow(tweets_final)))
+    dbAppendTable(db, "tweets", tweets_final)
+    
+  }
+  
+  dbDisconnect(db)
+  
+}
+
+mem_helper <- function() { # doesnt help w/ shit...
+  
+  env <- ls()
+  
+  for (i in env) {
+    
+    print(i)
+    
+    if (i == "db") {
+      
+      dbDisconnect(eval(parse(text=i)))
+      
+    } else {
+      
+      rm(eval(parse(text=i)))
+      
+    }
+    
+  }
+  
+  gc()
+  
+}
+
+db_maintainer <- function() {
+  
+  db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite")
+  tables <- dbListTables(db)
+  
+  if (length(tables) == 0) {
+    
+    message(paste("No data in SQLite DB ... \nScraping ALL dates"))
+    
+    dbDisconnect(db)
+    scrape_twitter(last_date = NULL)
+    
+  } else {
+    
+    tweets <- dbGetQuery(db, "SELECT `user_id`,`data.created_at` FROM tweets")
+    dbDisconnect(db)
+    
+    tweets$data.created_at <- as.Date(tweets$data.created_at)
+    
+    MR_tweet_dt <- tweets %>%
+      group_by(user_id) %>%
+      top_n(1,data.created_at)
+    
+    message(paste("Scraping dates: \n"))
+    message(MR_tweet_dt[1])
+    
+    scrape_twitter(last_date = MR_tweet_dt)
+    
+  }
+  
+  mem_helper()
+  gc()
+  
+}
+
+
+
+#while (TRUE) {
+  
+message(paste("Starting scraping @ ", Sys.Date(), " ", Sys.time()))
+  
+start_time <- Sys.time()
+  
+db_maintainer()
+  
+mem_helper()
+  
+end_time <- Sys.time()
+
+message(paste("Time taken for scraping: ", end_time-start_time, " \n"))
+
+#  Sys.sleep(604800) # scraping once a week
+  
+#}
+
+
+
+
+

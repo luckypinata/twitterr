@@ -21,13 +21,11 @@ require(shinydashboard)
 require(shinythemes)
 require(purrr)
 
-### results table for the model results then simply query this table instead of recomputing it every time. ###
-setwd("/Users/gummoxxx/dev/unlucky/app")
 #setwd("/srv/shiny-server")
-print(system("ls"))
-message(getwd())
+#message(getwd())
 
-db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite") # this query doesnt work, probably because of datatypes of columns
+setwd("/Users/gummoxxx/dev/unlucky/app")
+db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite")
 
 users <- dbGetQuery(db,"SELECT * FROM users")
 print(nrow(users))
@@ -79,7 +77,6 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                            br(),
                            
                            fluidRow(
-                             
                              tabsetPanel(
                                tabPanel("Politicians",
                                         dataTableOutput(outputId = "politicians")),
@@ -89,11 +86,30 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                            ),
                            
                            fluidRow(column(12,hr())),
+                           
                            br()
-                           # add US state map and show freq of tweets by region and party.
+                           # add US state map and show freq of tweets by region and party?
                   ), # end tab 1
                   
                   tabPanel("Descriptive",
+
+                           fluidRow(
+                             column(12,
+                                    tags$body(" The graph below illustrates the user interactions, where the intensity of the connection \"edge\" is given by its co-occurrence, which in turn is computed proportionally to the 99th percentile frequency to reduce the impact of outliers. See: "),
+                                    tags$a(href="https://rdrr.io/cran/quanteda.textplots/man/textplot_network.html", "Watanabe and Müller (2022)."),
+                                    style= "text-align: .h3; color: black")
+                           ),
+                           
+                           fluidRow(column(12,hr())),
+                           
+                           fluidRow(
+                             column(12, align="center",
+                                    HTML('<img src="network.png",  
+                                         style="text-align: center;"/>','<p style="text-align: center"></p>')
+                             )
+                           ),
+                           
+                           fluidRow(column(12,hr())),
                            
                            fluidRow(
                              column(12,
@@ -120,8 +136,8 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                              ), # end sidebar panel
                              
                              mainPanel(
-                               div(plotOutput(outputId = "plot1_p", width = "100%"), style="align-text: left;")
-                             )
+                               plotOutput(outputId = "plot1_p", width = "100%"), style="align-text: left;")
+                             
                            ),
                            
                            fluidRow(column(12,hr())),
@@ -251,14 +267,6 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                            fluidRow(
                              column(12, align="center",
                                     plotOutput(outputId = "sentiment_frequency", width= "100%"), style="align: center;"
-                             ) # end column
-                           ),
-                           
-                           fluidRow(column(12,hr())),
-                           
-                           fluidRow(
-                             column(12, align="center",
-                                    plotOutput(outputId = "topic_OT", width= "100%"), style="align: center;"
                              )
                            ),
                            
@@ -268,19 +276,14 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                 ) # end navbar
 ) # end ui
 
-
-
-
 # Define server logic ----
 server <- function(input, output) {
-  
-  # possible to remove duplicate stm model code?
 
   #scraper_master <- function(time){ # swap this for CRON job
   #  if (format(Sys.time(), "%H:%M") == time) {
   #    tryCatch(
   #      expr = {
-  #        source("./scraping.R")
+  #        source("./scraper_slave.R")
   #        message("Successfully completed scraping.")
   #      },
   #      error = function(e) {
@@ -293,7 +296,7 @@ server <- function(input, output) {
   #}
   
   #scraper_master("17:01") # calling scraping function
-  
+
   output$politicians <- renderDataTable({
     
     scrape_politicians <- function() {
@@ -336,8 +339,6 @@ server <- function(input, output) {
   
   output$plot1_p <- renderPlot({ # plot 1
     
-    #thematic::thematic_shiny()
-    
     plot1_vals <- input$plot1_selection_handles
     plot1_vars <- input$plot1_selection_variables
     
@@ -362,10 +363,11 @@ server <- function(input, output) {
       }
     }
     
-    df$data.created_at <- as.Date(df$data.created_at)
+    df$data.created_at <- as.Date(df$data.created_at) # did i not do this shit before?
     
     if (length(plot1_vals)==0){
       
+      message(paste("Building plot D/R for VAR: ", plot1_vars)) # debug graph not loading
       group.colours <- c(D = "#333BFF", R = "#FF0000")
       plot1 <- df %>% 
         group_by(data.created_at,Party) %>%
@@ -386,8 +388,9 @@ server <- function(input, output) {
         scale_color_manual(values=group.colours)
       plot1
       
-    } else if (length(plot1_vals)>0 & length(plot1_vals)<=5) {
+    } else if (length(plot1_vals)>=1 & length(plot1_vals)<=5) {
       
+      message(paste("Building plot for ", plot1_vals, "and VAR: ", plot1_vars))
       plot1 <- df %>% 
         group_by(data.created_at,data.username) %>%
         mutate(m_rtweet = mean(data.public_metrics.retweet_count),
@@ -446,7 +449,7 @@ server <- function(input, output) {
     } else if (wordcloud_topic == "Ukraine") {
       wordcloud_topic <- c("ukraina","ukraine","war")
     } else{
-      wordcloud_topic <- c("inflation","stagflation")
+      wordcloud_topic <- c("inflation","stagflation","prices")
     }
     
     if (length(wordcloud_individuals) <= 3 & length(wordcloud_individuals) >= 1) {
@@ -541,43 +544,12 @@ server <- function(input, output) {
   
   output$sentiment_topics_vector <- renderTable({
     
+    # get inputs using pre-computed models for each user u ... n(u)
     handle <- input$stm_handles
-    topic_count <- 10
+    model <- readRDS("data/stm_models.RData") %>% 
+      .[[handle]]
     
-    stm_df <- df %>%
-      filter(data.username == as.character(handle))
-    
-    stm_df$data.created_at <- as.Date(stm_df$data.created_at)
-    
-    stm_text <- stm_df$data.text
-    stm_docvars <- stm_df %>% select(-data.text)
-    
-    stm_corpus <- corpus(stm_text, docvars = stm_docvars)
-    
-    stm_toks <- stm_corpus %>%
-      tokens(remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) %>%
-      tokens_tolower() %>%
-      tokens_remove(stopwords("english")) %>%
-      tokens_remove(c("amp")) 
-    
-    stm_dfm <- stm_toks %>%
-      dfm(.,
-          stem = TRUE) %>%
-      dfm_trim(min_docfreq = 0.075,
-               max_docfreq = 0.90,
-               docfreq_type = "prop")
-    
-    stm <- convert(stm_dfm, to = "stm")
-    
-    model.stm <<- stm(
-      stm$documents,
-      stm$vocab,
-      K = topic_count,
-      data = stm$meta,
-      init.type = "Spectral"
-    )
-    
-    dt <- make.dt(model.stm)
+    dt <- make.dt(model)
     theta <-  dt %>%
       apply(.,2,mean) %>%
       as.data.frame() %>%
@@ -589,7 +561,7 @@ server <- function(input, output) {
       slice_head(n=5) %>%
       select(-val)
     
-    topics_keywords <- as.data.frame(t(labelTopics(model.stm, n = 10)$prob))
+    topics_keywords <- as.data.frame(t(labelTopics(model, n = 10)$prob))
     colnames(topics_keywords) <- gsub("V", "Topic", x = colnames(topics_keywords))
     
     topics_keywords <- topics_keywords[, colnames(topics_keywords) %in% theta_ordered$dat] 
@@ -604,42 +576,10 @@ server <- function(input, output) {
   output$sentiment_frequency <- renderPlot({
     
     handle <- input$stm_handles
-    topic_count <- 10
+    model <- readRDS("data/stm_models.RData") %>% 
+      .[[handle]]
     
-    stm_df <- df %>%
-      filter(data.username == as.character(handle))
-    
-    stm_df$data.created_at <- as.Date(stm_df$data.created_at)
-    
-    stm_text <- stm_df$data.text
-    stm_docvars <- stm_df %>% select(-data.text)
-    
-    stm_corpus <- corpus(stm_text, docvars = stm_docvars)
-    
-    stm_toks <- stm_corpus %>%
-      tokens(remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) %>%
-      tokens_tolower() %>%
-      tokens_remove(stopwords("english")) %>%
-      tokens_remove(c("amp")) 
-    
-    stm_dfm <- stm_toks %>%
-      dfm(.,
-          stem = TRUE) %>%
-      dfm_trim(min_docfreq = 0.075,
-               max_docfreq = 0.90,
-               docfreq_type = "prop")
-    
-    stm <- convert(stm_dfm, to = "stm")
-    
-    model.stm <<- stm(
-      stm$documents,
-      stm$vocab,
-      K = topic_count,
-      data = stm$meta,
-      init.type = "Spectral"
-    )
-    
-    dt <- make.dt(model.stm)
+    dt <- make.dt(model)
     theta <-  dt %>%
       apply(.,2,mean) %>%
       as.data.frame() %>%
@@ -651,7 +591,7 @@ server <- function(input, output) {
       slice_head(n=5) %>%
       select(-val)
     
-    topics_keywords <- as.data.frame(t(labelTopics(model.stm, n = 10)$prob))
+    topics_keywords <- as.data.frame(t(labelTopics(model, n = 10)$prob))
     colnames(topics_keywords) <- gsub("V", "Topic", x = colnames(topics_keywords))
     
     topics_keywords <- topics_keywords[, colnames(topics_keywords) %in% theta_ordered$dat] 
@@ -719,117 +659,31 @@ server <- function(input, output) {
     
   })
   
-  
-  
   output$stm_topics <- renderPlot({
     
     handle <- input$stm_handles
-    topic_count <- 10
-    
-    stm_df <- df %>%
-      filter(data.username == as.character(handle))
-    
-    stm_df$data.created_at <- as.Date(stm_df$data.created_at)
-    
-    stm_text <- stm_df$data.text
-    stm_docvars <- stm_df %>% select(-data.text)
-    
-    stm_corpus <- corpus(stm_text, docvars = stm_docvars)
-    
-    stm_toks <- stm_corpus %>%
-      tokens(remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) %>%
-      tokens_tolower() %>%
-      tokens_remove(stopwords("english")) %>%
-      tokens_remove(c("amp")) 
-    
-    stm_dfm <- stm_toks %>%
-      dfm(.,
-          stem = TRUE) %>%
-      dfm_trim(min_docfreq = 0.075,
-               max_docfreq = 0.90,
-               docfreq_type = "prop")
-    
-    stm <- convert(stm_dfm, to = "stm")
-    
-    model.stm <<- stm(
-      stm$documents,
-      stm$vocab,
-      K = topic_count,
-      data = stm$meta,
-      init.type = "Spectral"
-    )
+    model <- readRDS("data/stm_models.RData") %>% 
+      .[[handle]]
     
     title_plot <- paste0("STM topic shares for ", "@", handle)
     
     plot(
-      model.stm,
+      model,
       type = "summary",
       text.cex = 0.5,
       main = title_plot,
       xlab = "Share estimation"
     )
     
-    dt <- make.dt(model.stm)
-    theta <-  dt %>%
-      apply(.,2,mean) %>%
-      as.data.frame() %>%
-      filter(. < 1)
-    
-    theta$topic <- rownames(theta)
-    colnames(theta) <- c("val","dat")
-    theta_ordered <- theta[order(-theta$val),] %>%
-      slice_head(n=5) %>%
-      select(-val)
-    
-    topics_keywords <- as.data.frame(t(labelTopics(model.stm, n = 10)$prob))
-    colnames(topics_keywords) <- gsub("V", "Topic", x = colnames(topics_keywords))
-    
-    topics_keywords <- topics_keywords[, colnames(topics_keywords) %in% theta_ordered$dat] 
-    
-    stm_topic_selection <- as.list(topics_keywords)
-    names(stm_topic_selection) <- gsub("(?<=\\D)(?=\\d)", " ", names(stm_topic_selection), perl = TRUE)
-    
   })
   
   output$topics_input <- renderUI({
     
     handle <- input$stm_handles
-    topic_count <- 10
+    model <- readRDS("data/stm_models.RData") %>% 
+      .[[handle]]
     
-    stm_df <- df %>%
-      filter(data.username == as.character(handle))
-    
-    stm_df$data.created_at <- as.Date(stm_df$data.created_at)
-    
-    stm_text <- stm_df$data.text
-    stm_docvars <- stm_df %>% select(-data.text)
-    
-    stm_corpus <- corpus(stm_text, docvars = stm_docvars)
-    
-    stm_toks <- stm_corpus %>%
-      tokens(remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) %>%
-      tokens_tolower() %>%
-      tokens_remove(stopwords("english")) %>%
-      tokens_remove(c("amp")) 
-    
-    stm_dfm <- stm_toks %>%
-      dfm(.,
-          stem = TRUE) %>%
-      dfm_trim(min_docfreq = 0.075,
-               max_docfreq = 0.90,
-               docfreq_type = "prop")
-    
-    stm <- convert(stm_dfm, to = "stm")
-    
-    model.stm <- stm(
-      stm$documents,
-      stm$vocab,
-      K = topic_count,
-      data = stm$meta, 
-      init.type = "Spectral"
-    )
-    
-    dt <- make.dt(model.stm)
+    dt <- make.dt(model)
     theta <-  dt %>%
       apply(.,2,mean) %>%
       as.data.frame() %>%
@@ -841,7 +695,7 @@ server <- function(input, output) {
       slice_head(n=5) %>%
       select(-val)
     
-    topics_keywords <- as.data.frame(t(labelTopics(model.stm, n = 10)$prob))
+    topics_keywords <- as.data.frame(t(labelTopics(model, n = 10)$prob))
     colnames(topics_keywords) <- gsub("V", "Topic", x = colnames(topics_keywords))
     
     topics_keywords <- topics_keywords[, colnames(topics_keywords) %in% theta_ordered$dat] 
