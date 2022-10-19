@@ -22,26 +22,14 @@ require(shinythemes)
 require(purrr)
 
 #setwd("/srv/shiny-server")
-#message(getwd())
 
-setwd("/Users/gummoxxx/dev/unlucky/app")
 db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite")
-
-users <- dbGetQuery(db,"SELECT * FROM users")
-print(nrow(users))
 tweets <-dbGetQuery(db,"SELECT * FROM tweets")
-print(nrow(tweets))
-
-df <- merge(users,tweets,by.x="data.id",by.y="user_id",all=TRUE)
-print(nrow(df))
-
-# the fucking lord knows why this doesn't work.
-#df <- dbGetQuery(db, "SELECT * FROM users 
-#                      LEFT JOIN tweets
-#                      ON \"users.data.id\" = \"tweets.user_id\"
-#                 ") 
-
+users <-dbGetQuery(db,"SELECT * FROM users")
+df <- merge(tweets,users,by.x="uid",by.y="data.id",all=TRUE)
 dbDisconnect(db)
+rm(tweets)
+rm(users)
 
 ui <- fluidPage(theme = shinytheme("yeti"),
                 
@@ -88,7 +76,9 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                            fluidRow(column(12,hr())),
                            
                            br()
-                           # add US state map and show freq of tweets by region and party?
+                           
+                           # add US state map and show freq of tweets by region and party
+                           
                   ), # end tab 1
                   
                   tabPanel("Descriptive",
@@ -121,10 +111,9 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                            
                            fluidRow(           
                              sidebarPanel(
-                               checkboxGroupInput("plot1_selection_handles", label = h3("Select Handles"),
-                                                  choices = unique(na.omit(df$data.username),
-                                                                   selected = unique(na.omit(df$data.username)[1])) # add republicans, democrats as options
-                               ), 
+                               selectInput("plot1_selection_handles", label = h3("Select Handles"),
+                                                  choices = unique(na.omit(df$handle)),
+                                                                   multiple = TRUE), 
                                hr(),
                                selectInput("plot1_selection_variables", label = h3("Select Variables"),
                                            choices = list("Reply" = 'm_reply',
@@ -173,7 +162,7 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                            
                            sidebarPanel(
                              selectInput("analysis_units_individual", label=h3("Select Handle(s)"),
-                                         choices=unique(na.omit(df$data.username)), multiple=TRUE), # add republicans, democrats as options
+                                         choices=unique(na.omit(df$handle)), multiple=TRUE), # add republicans, democrats as options
                              hr(),
                              selectInput("analysis_units_topic", label = h3("Select Topic"),
                                          choices = list("Covid" = 'covid',
@@ -218,7 +207,7 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                                     tags$table(style="width:100%",
                                                tags$tr(tags$td(style="width:50%",
                                                                selectInput("stm_handles", label = h3("Select Handle"),
-                                                                           choices = unique(na.omit(df$data.username))),align="center"),
+                                                                           choices = unique(na.omit(df$handle))),align="center"),
                                                        tags$td(style="width:50%",
                                                                titlePanel(h2("STM Topics and Keywords",align="center")))
                                                ))) 
@@ -273,67 +262,18 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                            fluidRow(column(12,hr()))
                            
                   ) # end analytics tab
-                ) # end navbar
+              ) # end navbar
 ) # end ui
 
 # Define server logic ----
 server <- function(input, output) {
 
-  #scraper_master <- function(time){ # swap this for CRON job
-  #  if (format(Sys.time(), "%H:%M") == time) {
-  #    tryCatch(
-  #      expr = {
-  #        source("./scraper_slave.R")
-  #        message("Successfully completed scraping.")
-  #      },
-  #      error = function(e) {
-  #        message("Error while running scraping.R")
-  #        print(e)
-  #      }, 
-  #      finally = {message("Whatever.")}
-  #    )
-  #  }
-  #}
-  
-  #scraper_master("17:01") # calling scraping function
-
   output$politicians <- renderDataTable({
     
-    scrape_politicians <- function() {
-      
-      url <- "https://triagecancer.org/congressional-social-media"
-      xpath <- "/html/body/div[1]/div/div/div/div/div/div[2]"
-      
-      politician_table <- read_html(url) %>% # better way of storing this info??
-        html_nodes(., xpath = xpath) %>%
-        html_table() %>%
-        .[[1]]
-      
-      twitter_info <- politician_table %>%
-        select(State, `Member of Congress`, Name, Party, Twitter) %>%
-        filter(nchar(Twitter) > 1) %>%
-        separate(., Name, c("LName", "FName"), sep = "[,]{0,}+[[:space:]]{1,}") %>%
-        separate(., State, c("State", "District"), sep = "[0-9].*$|At-Large") %>%
-        select(-District)
-      
-      # need to do this 1 column manually as cannot specify andOR in regex separate...
-      # find more elegant solution here still to cove all separate conditions, 
-      # maybe write own function going through each cell checking condition?
-      twitter_info[177,"LName"] <- "LaHood"
-      twitter_info[177,"FName"] <- "Darin"
-      
-      twitter_info <- twitter_info %>%
-        unite(., "name", c(FName,LName), sep = " ")
-      
-      colnames(twitter_info) <- c("State", "Member of Congress", "Name", "Party", "Twitter Handle")
-      
-      return(twitter_info)
-      
-    }
-    
-    dat <- scrape_politicians()
-    
-    dat
+    db <- dbConnect(RSQLite::SQLite(), "data/twitter.sqlite")
+    tbl <- dbGetQuery(db, "SELECT State,`Member of Congress`,Name,Party,Twitter FROM users")
+    dbDisconnect(db)
+    tbl
     
   })
   
@@ -342,25 +282,14 @@ server <- function(input, output) {
     plot1_vals <- input$plot1_selection_handles
     plot1_vars <- input$plot1_selection_variables
     
-    yaxis <- function() {
-      if (as.character(plot1_vars) == "m_reply") {
-        return("Mean Replies")
-      }
-      else if (as.character(plot1_vars) == "m_rtweet") {
-        return("Mean Re-Tweets")
-      }
-      else if (as.character(plot1_vars) == "m_like") {
-        return("Mean Likes")
-      }
-      else if (as.character(plot1_vars) == "m_quote") {
-        return("Mean Quotes")
-      }
-      else if (as.character(plot1_vars) == "mean_interaction") {
-        return("Mean Interaction")
-      }
-      else {
-        return("no var")
-      }
+    var_list <- list("m_reply" = "Mean Replies",
+              "m_rtweet" = "Mean Re-Tweets",
+              "m_like"= "Mean Likes",
+              "m_quote" = "Mean Quotes",
+              "mean_interaction" = "Mean Interaction")
+    
+    yaxis <- function(s = plot1_vars, l = var_list) {
+      return(l[[s]])
     }
     
     df$data.created_at <- as.Date(df$data.created_at) # did i not do this shit before?
@@ -392,17 +321,17 @@ server <- function(input, output) {
       
       message(paste("Building plot for ", plot1_vals, "and VAR: ", plot1_vars))
       plot1 <- df %>% 
-        group_by(data.created_at,data.username) %>%
+        group_by(data.created_at,uname) %>%
         mutate(m_rtweet = mean(data.public_metrics.retweet_count),
                m_reply = mean(data.public_metrics.reply_count),
                m_like = mean(data.public_metrics.like_count),
                m_quote = mean(data.public_metrics.quote_count)) %>%
         drop_na() %>%
         mutate(mean_interaction = round((m_rtweet+m_reply+m_like+m_quote)/4, digits = 3)) %>%
-        filter(data.username %in% plot1_vals) %>%
+        filter(Twitter %in% plot1_vals) %>%
         ungroup() %>%
         ggplot(aes(x=data.created_at,y=get(plot1_vars))) + # using get() to select column based on variable input
-        geom_smooth(aes(color=data.username,group=data.username),se=F) +
+        geom_smooth(aes(color=uname,group=uname),se=F) +
         theme_bw() +
         theme(legend.position="bottom") +
         labs(color="Handle(s)") +
@@ -421,9 +350,9 @@ server <- function(input, output) {
   output$top_tweets <- renderTable({
     
     mpoptweet <- df %>%
-      distinct(data.id.y, .keep_all = TRUE) %>%
+      distinct(data.id, .keep_all = TRUE) %>%
       drop_na() %>%
-      group_by(data.id.y) %>%
+      group_by(data.id) %>%
       mutate(mean_interaction = 
                round(
                  (data.public_metrics.retweet_count+data.public_metrics.reply_count+data.public_metrics.like_count+data.public_metrics.quote_count)/4
@@ -433,7 +362,7 @@ server <- function(input, output) {
     mpoptweet$rank <- c(1:nrow(mpoptweet))
     mpoptweet <- mpoptweet[mpoptweet$rank <= 5,]
     mpoptweet <- mpoptweet %>% 
-      select(c(rank,data.username,data.text))
+      select(c(rank,Twitter,data.text))
     colnames(mpoptweet) <- c("Rank", "User", "Tweet")
     as.data.frame(mpoptweet, check.names = FALSE)
     
@@ -444,19 +373,19 @@ server <- function(input, output) {
     wordcloud_individuals <- input$analysis_units_individual
     wordcloud_topic <- input$analysis_units_topic # add more terms for topics; add method for search "as text" on site?.
     
-    if (wordcloud_topic == "covid") {
-      wordcloud_topic <- c("covid","covid-19","virus")
-    } else if (wordcloud_topic == "Ukraine") {
-      wordcloud_topic <- c("ukraina","ukraine","war")
-    } else{
-      wordcloud_topic <- c("inflation","stagflation","prices")
+    klist <- list("covid" = c("covid","covid-19","virus"),
+                  "ukraine" = c("ukraina","ukraine","war"),
+                  "inflation" = c("inflation","stagflation","prices"))
+    
+    topics <- function(w = wordcloud_topic, l = klist) {
+      return(l[[w]])
     }
     
     if (length(wordcloud_individuals) <= 3 & length(wordcloud_individuals) >= 1) {
       
       wordcloud_df <- df %>% 
-        select(data.id,data.username,data.created_at,data.text) %>%
-        filter(data.username %in% wordcloud_individuals)
+        select(data.id,handle,data.created_at,data.text) %>%
+        filter(handle %in% wordcloud_individuals)
       
       wordcloud_text <- wordcloud_df$data.text
       
@@ -470,9 +399,9 @@ server <- function(input, output) {
         tokens_tolower() %>%
         tokens_remove(stopwords("english")) %>%
         tokens_remove(c("amp")) %>%
-        tokens_keep(pattern=phrase(as.character(wordcloud_topic)),window=10) %>%
+        tokens_keep(pattern=phrase(topics()),window=10) %>%
         dfm() %>%
-        dfm_group(groups = data.username)
+        dfm_group(groups = handle)
       
       if (length(tokens) > 0 & length(wordcloud_individuals) > 1) {
         textplot_wordcloud(tokens, comparison = TRUE, max_words = 50, random_color=TRUE) # output n random colours still
@@ -485,7 +414,7 @@ server <- function(input, output) {
     } else {
       
       wordcloud_df <- df %>% 
-        select(data.id,Party,data.created_at,data.text)
+        select(uid,Party,data.created_at,data.text)
       
       dems_df <- wordcloud_df %>% 
         filter(Party == "D")
@@ -510,6 +439,14 @@ server <- function(input, output) {
         tokens_remove(c("amp")) %>%
         dfm()
       
+      d <- textstat_frequency(dems_tokens) %>% 
+        as.data.frame() %>%
+        select(c(1,2)) %>%
+        filter(frequency>1)
+      
+      rownames(d) <- d$feature
+      colnames(d) <- c("word","freq")
+      
       reps_tokens <- reps_corpus %>%
         tokens(remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) %>%
         tokens_tolower() %>%
@@ -518,22 +455,22 @@ server <- function(input, output) {
         dfm()
       
       # make this into dem / rep WC's still when have full dataset
-      d <- textstat_frequency(reps_tokens) %>% 
+      r <- textstat_frequency(reps_tokens) %>% 
         as.data.frame() %>%
         select(c(1,2)) %>%
         filter(frequency>1)
       
-      rownames(d) <- d$feature
-      colnames(d) <- c("word","freq")
+      rownames(r) <- r$feature
+      colnames(r) <- c("word","freq")
       
       set.seed(123)
       
       par(mfrow=c(1,2))
-      wordcloud(words = d$word, freq = d$freq, min.freq = 1,
+      wordcloud(words = d$word, freq = d$freq, min.freq = 20,
                 max.words=200, random.order=FALSE, rot.per=0.35, 
                 colors=brewer.pal(8, "Dark2"))
       title("Democrats")
-      wordcloud(words = d$word, freq = d$freq, min.freq = 1,
+      wordcloud(words = r$word, freq = r$freq, min.freq = 20,
                 max.words=200, random.order=FALSE, rot.per=0.35, 
                 colors=brewer.pal(8, "Dark2"))
       title("Republicans")
@@ -544,8 +481,10 @@ server <- function(input, output) {
   
   output$sentiment_topics_vector <- renderTable({
     
-    # get inputs using pre-computed models for each user u ... n(u)
-    handle <- input$stm_handles
+    handle <- input$stm_handles %>%
+      gsub("@","",.) %>%
+      tolower()
+
     model <- readRDS("data/stm_models.RData") %>% 
       .[[handle]]
     
@@ -561,7 +500,7 @@ server <- function(input, output) {
       slice_head(n=5) %>%
       select(-val)
     
-    topics_keywords <- as.data.frame(t(labelTopics(model, n = 10)$prob))
+    topics_keywords <- as.data.frame(t(labelTopics(model, n = 5)$prob))
     colnames(topics_keywords) <- gsub("V", "Topic", x = colnames(topics_keywords))
     
     topics_keywords <- topics_keywords[, colnames(topics_keywords) %in% theta_ordered$dat] 
@@ -575,9 +514,12 @@ server <- function(input, output) {
   
   output$sentiment_frequency <- renderPlot({
     
-    handle <- input$stm_handles
+    uhandle <- input$stm_handles %>%
+      gsub("@","",.) %>%
+      tolower()
+
     model <- readRDS("data/stm_models.RData") %>% 
-      .[[handle]]
+      .[[uhandle]]
     
     dt <- make.dt(model)
     theta <-  dt %>%
@@ -591,23 +533,25 @@ server <- function(input, output) {
       slice_head(n=5) %>%
       select(-val)
     
-    topics_keywords <- as.data.frame(t(labelTopics(model, n = 10)$prob))
+    topics_keywords <- as.data.frame(t(labelTopics(model, n = 5)$prob))
     colnames(topics_keywords) <- gsub("V", "Topic", x = colnames(topics_keywords))
     
     topics_keywords <- topics_keywords[, colnames(topics_keywords) %in% theta_ordered$dat] 
-    
+
     stm_topic_selection <- as.list(topics_keywords)
     names(stm_topic_selection) <- gsub("(?<=\\D)(?=\\d)", " ", names(stm_topic_selection), perl = TRUE)
-    
+
     sentiment_topics <- input$sentiment_topics
+    print(sentiment_topics)
     keywords <- stm_topic_selection[[sentiment_topics]]
-    
+    print(keywords)
+
     data_dictionary <- data_dictionary_LSD2015[1:2]
     
     df$data.created_at <- as.Date(df$data.created_at)
     
-    sentiment_df <- df %>% 
-      filter(data.username %in% input$stm_handles)
+    sentiment_df <- df %>% # problem, but why??
+      filter(uhandle == uname)
     
     sentiment_text <- sentiment_df$data.text
     sentiment_docvars <- sentiment_df %>% select(-data.text)
@@ -619,7 +563,7 @@ server <- function(input, output) {
       tokens_tolower() %>%
       tokens_remove(stopwords("english")) %>%
       tokens_remove(c("amp")) %>%
-      tokens_keep(pattern=phrase(keywords), window= 10) # emojis
+      tokens_keep(pattern=phrase(keywords), window= 10)
     
     sentiment_dict <- tokens_lookup(sentiment_tokens, dictionary = data_dictionary)
     
@@ -648,7 +592,7 @@ server <- function(input, output) {
     
     abline(h = 0, lty = 2)
     
-    # add neutral class
+    # add neutral class #
     
   })
   
@@ -661,7 +605,9 @@ server <- function(input, output) {
   
   output$stm_topics <- renderPlot({
     
-    handle <- input$stm_handles
+    handle <- input$stm_handles %>%
+      gsub("@","",.) %>%
+      tolower()
     model <- readRDS("data/stm_models.RData") %>% 
       .[[handle]]
     
@@ -679,7 +625,9 @@ server <- function(input, output) {
   
   output$topics_input <- renderUI({
     
-    handle <- input$stm_handles
+    handle <- input$stm_handles %>%
+      gsub("@","",.) %>%
+      tolower()
     model <- readRDS("data/stm_models.RData") %>% 
       .[[handle]]
     
@@ -695,7 +643,7 @@ server <- function(input, output) {
       slice_head(n=5) %>%
       select(-val)
     
-    topics_keywords <- as.data.frame(t(labelTopics(model, n = 10)$prob))
+    topics_keywords <- as.data.frame(t(labelTopics(model, n = 5)$prob))
     colnames(topics_keywords) <- gsub("V", "Topic", x = colnames(topics_keywords))
     
     topics_keywords <- topics_keywords[, colnames(topics_keywords) %in% theta_ordered$dat] 

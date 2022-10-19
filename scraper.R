@@ -1,6 +1,18 @@
+#!/usr/bin/env Rscript 
 
+require(stringr)
+require(stringi)
+require(httr)
+require(jsonlite)
+require(plyr)
+require(DBI)
+require(RSQLite)
+require(dplyr)
+require(rvest)
+require(tidyr)
 
-```{r}
+setwd("/srv/shiny-server")
+
 scrape_politicians <- function() {
   
   url <- "https://triagecancer.org/congressional-social-media"
@@ -36,6 +48,7 @@ scrape_users <- function() { # function to scrape relevant user data; spec. the 
   
   unique_politicians <- unique(politicians$Twitter) %>% 
     gsub("@", "", .)
+  unique_politicians <- sample(unique_politicians,5) ### for testing
   
   headers <- c(`Authorization` = sprintf('Bearer %s', read.delim("bearer.txt", header = FALSE)))
   
@@ -59,9 +72,8 @@ scrape_users <- function() { # function to scrape relevant user data; spec. the 
       fromJSON(flatten = TRUE) %>%
       as.data.frame()
     
-    # make this more robust
     if (!"errors.type" %in% colnames(ids[[i]])) { # checking for rate limit and dropping other errors
-      
+      # make this more robust.
       message("Success.")
       
     } else if ("errors.type" %in% colnames(ids[[i]]) &
@@ -77,8 +89,6 @@ scrape_users <- function() { # function to scrape relevant user data; spec. the 
       message(head(ids[[i]], n = 1))
       message(paste("Sleeping for 15 minutes, then attempting to scrape", unique_politicians[i]))
       
-      ids[[i]] <- NULL
-      
       Sys.sleep(915) # sleep for >15 min for rl
       
       response <- httr::GET(url = url_handle,
@@ -92,7 +102,7 @@ scrape_users <- function() { # function to scrape relevant user data; spec. the 
     } else {
 
       message(ids[[i]])
-      message("Unknown error while scraping user data. Aborting.")
+      message("Unknown error. Aborting.")
       
       break
       
@@ -339,4 +349,12 @@ clean_tweets <- function() {
   dbWriteTable(db, "tweets", tweets)
   
 }
-```
+
+scrape_tweets(last_date = NULL)
+clean_tweets()
+
+
+
+
+
+
